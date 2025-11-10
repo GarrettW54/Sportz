@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sportz — Live Scores</title>
+
+<style>
+:root {
+  --bg:#0B1620; --card:#112531; --accent:#E03A3E; --text:#EAF4FB; --muted:#9AB1BD;
+}
+[data-theme="light"] {
+  --bg:#ffffff; --card:#f4f7fa; --accent:#d13636; --text:#000; --muted:#555;
+}
+
+body {
+  font-family: Inter, sans-serif;
+  margin:0; background:var(--bg); color:var(--text);
+}
+header { display:flex;align-items:center;padding:15px 20px;gap:12px;position:sticky;top:0;background:var(--bg);z-index:10; }
+.logo { font-weight:800;font-size:20px;background:var(--accent);padding:10px;color:white;border-radius:8px; }
+button,select { background:var(--card);color:var(--text);border:none;padding:8px;border-radius:6px; }
+main { display:grid;grid-template-columns:2fr 1fr;gap:15px;padding:15px; }
+@media(max-width:930px){ main{grid-template-columns:1fr;} }
+
+.section { background:var(--card);border-radius:10px;padding:12px; }
+.board-title{display:flex;justify-content:space-between;align-items:center;font-weight:bold;margin-bottom:8px}
+.game {display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.03);
+      padding:10px;margin-bottom:8px;border-radius:8px;cursor:pointer;transition:.2s;}
+.game:hover{transform:scale(1.02)}
+.team-block{display:flex;align-items:center;gap:8px;}
+.team-logo{width:34px;height:34px;border-radius:50%;object-fit:contain;background:#fff;}
+.score {font-size:19px;font-weight:900;text-align:right}
+.meta { color:var(--muted);font-size:12px; }
+.switcher{margin-left:auto}
+</style>
+</head>
+
+<body>
+<header>
+  <div class="logo">SZ</div>
+  <strong>Sportz Live</strong>
+  <select id="sport">
+    <option value="basketball/nba">NBA</option>
+    <option value="football/nfl">NFL</option>
+    <option value="baseball/mlb">MLB</option>
+    <option value="football/college-football">CFB</option>
+  </select>
+
+  <button id="refresh">Refresh</button>
+  <button id="themeBtn">Light/Dark</button>
+</header>
+
+<main>
+  <section class="section">
+    <div class="board-title">
+      Games <span class="meta" id="lastUpdated"></span>
+    </div>
+    <div id="gamesList">Loading…</div>
+  </section>
+
+  <section class="section">
+    <h3>Standings</h3>
+    <div id="standingsList" class="meta">Loading standings…</div>
+  </section>
+</main>
+
+<script>
+const API_BASE = "https://site.api.espn.com/apis/site/v2/sports";
+const leagues = {
+  "basketball/nba":"nba",
+  "football/nfl":"nfl",
+  "baseball/mlb":"mlb",
+  "football/college-football":"college-football",
+};
+
+async function getJSON(url){
+  const res = await fetch(url);
+  return res.json();
+}
+
+async function loadScores(){
+  const sportPath = document.getElementById("sport").value;
+  const url = `${API_BASE}/${sportPath}/scoreboard`;
+  const data = await getJSON(url);
+  document.getElementById("lastUpdated").textContent = new Date().toLocaleTimeString();
+
+  const gamesDiv = document.getElementById("gamesList");
+  gamesDiv.innerHTML="";
+
+  (data.events||[]).forEach(ev=>{
+    const comp = ev.competitions[0];
+    const away = comp.competitors.find(c=>c.homeAway=="away");
+    const home = comp.competitors.find(c=>c.homeAway=="home");
+
+    const el = document.createElement("div");
+    el.className="game";
+    el.innerHTML = `
+      <div class="team-block">
+        <img class="team-logo" src="${away.team.logo}" />
+        <div>${away.team.abbreviation}</div>
+      </div>
+      <div class="score">${away.score ?? "-"} — ${home.score ?? "-"}</div>
+      <div class="team-block">
+        <div>${home.team.abbreviation}</div>
+        <img class="team-logo" src="${home.team.logo}" />
+      </div>
+    `;
+    gamesDiv.appendChild(el);
+  });
+}
+
+async function loadStandings(){
+  const sportPath = document.getElementById("sport").value;
+  const league = leagues[sportPath];
+  const standingsUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath}/standings`;
+  const data = await getJSON(standingsUrl);
+
+  const box = document.getElementById("standingsList");
+  box.innerHTML = "";
+
+  const groups = data.standings?.groups?.slice(0,1) || [];
+  groups.forEach(group=>{
+    group.standings.forEach(t=>{
+      const tr = document.createElement("div");
+      tr.style.marginBottom="4px";
+      tr.innerHTML = `<b>${t.team.displayName}</b> — ${t.stats[0].displayValue}`;
+      box.appendChild(tr);
+    });
+  });
+}
+
+document.getElementById("refresh").onclick = ()=>{loadScores();loadStandings()};
+document.getElementById("sport").onchange = ()=>{loadScores();loadStandings()};
+
+document.getElementById("themeBtn").onclick = ()=>{
+  document.body.dataset.theme =
+    document.body.dataset.theme === "light" ? "dark" : "light";
+};
+
+loadScores(); loadStandings();
+setInterval(loadScores,60000);
+</script>
+</body>
+</html>
