@@ -1,145 +1,766 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sportz — Live Scores</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sportz — Live Scores (All features)</title>
 
-<style>
-:root {
-  --bg:#0B1620; --card:#112531; --accent:#E03A3E; --text:#EAF4FB; --muted:#9AB1BD;
-}
-[data-theme="light"] {
-  --bg:#ffffff; --card:#f4f7fa; --accent:#d13636; --text:#000; --muted:#555;
-}
+  <!-- Tailwind Play CDN for styling (no build needed) -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
-body {
-  font-family: Inter, sans-serif;
-  margin:0; background:var(--bg); color:var(--text);
-}
-header { display:flex;align-items:center;padding:15px 20px;gap:12px;position:sticky;top:0;background:var(--bg);z-index:10; }
-.logo { font-weight:800;font-size:20px;background:var(--accent);padding:10px;color:white;border-radius:8px; }
-button,select { background:var(--card);color:var(--text);border:none;padding:8px;border-radius:6px; }
-main { display:grid;grid-template-columns:2fr 1fr;gap:15px;padding:15px; }
-@media(max-width:930px){ main{grid-template-columns:1fr;} }
+  <!-- Socket.io client (optional: used if you run a server with socket.io) -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
-.section { background:var(--card);border-radius:10px;padding:12px; }
-.board-title{display:flex;justify-content:space-between;align-items:center;font-weight:bold;margin-bottom:8px}
-.game {display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.03);
-      padding:10px;margin-bottom:8px;border-radius:8px;cursor:pointer;transition:.2s;}
-.game:hover{transform:scale(1.02)}
-.team-block{display:flex;align-items:center;gap:8px;}
-.team-logo{width:34px;height:34px;border-radius:50%;object-fit:contain;background:#fff;}
-.score {font-size:19px;font-weight:900;text-align:right}
-.meta { color:var(--muted);font-size:12px; }
-.switcher{margin-left:auto}
-</style>
+  <style>
+    /* small visual refinements */
+    .logo-square { width:40px; height:40px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; color:white; background:#e03a3e; }
+    .team-logo { width:36px; height:36px; border-radius:6px; object-fit:contain; background:#fff; padding:4px; }
+    .card { background: rgba(255,255,255,0.03); border-radius:12px; padding:12px; }
+    .muted { color: rgba(255,255,255,0.6) }
+    /* bottom nav safe area */
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
 </head>
+<body class="bg-[#071524] text-[#eaf4fb] leading-relaxed" data-theme="dark">
 
-<body>
-<header>
-  <div class="logo">SZ</div>
-  <strong>Sportz Live</strong>
-  <select id="sport">
-    <option value="basketball/nba">NBA</option>
-    <option value="football/nfl">NFL</option>
-    <option value="baseball/mlb">MLB</option>
-    <option value="football/college-football">CFB</option>
-  </select>
+  <div class="max-w-5xl mx-auto p-4 safe-bottom">
+    <!-- Header -->
+    <header class="flex items-center gap-3 mb-4">
+      <div class="logo-square">SZ</div>
+      <div>
+        <div class="text-lg font-bold">Sportz</div>
+        <div class="text-sm muted">Live scores, standings, teams, chat, highlights & fantasy</div>
+      </div>
 
-  <button id="refresh">Refresh</button>
-  <button id="themeBtn">Light/Dark</button>
-</header>
+      <div class="ml-auto flex items-center gap-2">
+        <select id="leagueSelect" class="bg-[#0f2430] rounded px-3 py-2 text-sm">
+          <option value="basketball/nba">NBA</option>
+          <option value="football/nfl">NFL</option>
+          <option value="baseball/mlb">MLB</option>
+          <option value="football/college-football">College Football</option>
+        </select>
+        <button id="refreshBtn" class="bg-[#13303a] px-3 py-2 rounded text-sm">Refresh</button>
+        <button id="themeBtn" class="bg-[#13303a] px-3 py-2 rounded text-sm">Light</button>
+      </div>
+    </header>
 
-<main>
-  <section class="section">
-    <div class="board-title">
-      Games <span class="meta" id="lastUpdated"></span>
+    <!-- Main layout -->
+    <div id="app" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- Scores + content panel (left, spans 2 on md) -->
+      <main id="mainPane" class="md:col-span-2 space-y-4">
+        <!-- Scoreboard card -->
+        <section id="scoreboardCard" class="card">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-semibold">Live Games</div>
+            <div class="muted text-sm" id="lastUpdated">—</div>
+          </div>
+          <div id="gamesList" class="space-y-2">Loading games…</div>
+        </section>
+
+        <!-- Game details / team pages / highlights / fantasy switcher -->
+        <section id="detailCard" class="card">
+          <div class="flex items-center gap-3 mb-3">
+            <div id="detailTitle" class="font-semibold">Game Details</div>
+            <div class="muted text-sm" id="detailSub">Select a game to see details</div>
+            <div class="ml-auto flex gap-2">
+              <button data-view="game" class="viewBtn bg-[#0e2a35] px-2 py-1 rounded text-sm">Game</button>
+              <button data-view="team" class="viewBtn bg-[#0e2a35] px-2 py-1 rounded text-sm">Team</button>
+              <button data-view="highlights" class="viewBtn bg-[#0e2a35] px-2 py-1 rounded text-sm">Highlights</button>
+              <button data-view="fantasy" class="viewBtn bg-[#0e2a35] px-2 py-1 rounded text-sm">Fantasy</button>
+            </div>
+          </div>
+          <div id="detailBody" class="muted text-sm">No game selected.</div>
+        </section>
+
+        <!-- Chat -->
+        <section id="chatCard" class="card">
+          <div class="font-semibold mb-2">Fan Chat</div>
+          <div id="chatLog" class="h-48 overflow-auto mb-2 p-2 bg-[#06151a] rounded"></div>
+          <div class="flex gap-2">
+            <input id="chatName" placeholder="Name" class="flex-shrink px-3 py-2 rounded bg-[#0b2430]"/>
+            <input id="chatMsg" placeholder="Message" class="flex-1 px-3 py-2 rounded bg-[#0b2430]"/>
+            <button id="chatSend" class="px-3 py-2 rounded bg-[#1d6b78]">Send</button>
+          </div>
+          <div class="text-xs muted mt-2">Chat uses Socket.io if your Sportz server is running; otherwise messages persist only in your browser (localStorage fallback).</div>
+        </section>
+      </main>
+
+      <!-- Sidebar (right) -->
+      <aside class="space-y-4">
+        <section class="card">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-semibold">Standings</div>
+            <div class="muted text-xs">Summarized</div>
+          </div>
+          <div id="standingsList" class="text-sm muted">Loading standings…</div>
+        </section>
+
+        <section class="card">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-semibold">Teams</div>
+            <button id="teamsBtn" class="px-2 py-1 text-sm bg-[#0e2a35] rounded">Browse</button>
+          </div>
+          <div id="teamsList" class="text-sm muted">—</div>
+        </section>
+
+        <section class="card">
+          <div class="font-semibold mb-2">Quick Highlights</div>
+          <div class="text-sm muted mb-2">Paste a YouTube video id (or full URL) to embed a highlight.</div>
+          <input id="ytInput" placeholder="YouTube video id or URL" class="w-full px-3 py-2 rounded bg-[#0b2430] mb-2"/>
+          <button id="embedBtn" class="w-full bg-[#1d6b78] px-3 py-2 rounded">Embed</button>
+          <div id="ytEmbed" class="mt-3"></div>
+        </section>
+      </aside>
     </div>
-    <div id="gamesList">Loading…</div>
-  </section>
 
-  <section class="section">
-    <h3>Standings</h3>
-    <div id="standingsList" class="meta">Loading standings…</div>
-  </section>
-</main>
+    <!-- Bottom nav for mobile -->
+    <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 bg-[#061a1f] py-2 md:hidden flex justify-around border-t border-[#0b2a2f]">
+      <button class="text-xs" data-nav="scores">Scores</button>
+      <button class="text-xs" data-nav="standings">Standings</button>
+      <button class="text-xs" data-nav="teams">Teams</button>
+      <button class="text-xs" data-nav="chat">Chat</button>
+    </nav>
 
-<script>
-const API_BASE = "https://site.api.espn.com/apis/site/v2/sports";
-const leagues = {
-  "basketball/nba":"nba",
-  "football/nfl":"nfl",
-  "baseball/mlb":"mlb",
-  "football/college-football":"college-football",
-};
+    <footer class="text-center muted text-xs mt-4">Sportz — built for demonstration. ESPN endpoints used for data. © Not affiliated with ESPN.</footer>
+  </div>
 
-async function getJSON(url){
-  const res = await fetch(url);
-  return res.json();
-}
+  <!-- Inline script: all app logic -->
+  <script>
+  (function(){
+    /* ===========================
+       Configuration
+       =========================== */
+    // If you run the Node proxy, set API_BASE to 'http://localhost:3000/proxy'
+    let API_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
+    // If you run the server with socket.io, point SOCKET_URL to it. Otherwise leave null to only poll.
+    const SOCKET_URL = 'http://localhost:4000';
 
-async function loadScores(){
-  const sportPath = document.getElementById("sport").value;
-  const url = `${API_BASE}/${sportPath}/scoreboard`;
-  const data = await getJSON(url);
-  document.getElementById("lastUpdated").textContent = new Date().toLocaleTimeString();
+    const POLL_INTERVAL = 20_000; // 20s polling fallback
+    const DEFAULT_LEAGUE = 'basketball/nba';
 
-  const gamesDiv = document.getElementById("gamesList");
-  gamesDiv.innerHTML="";
+    /* ===========================
+       Tiny helpers
+       =========================== */
+    function el(q, ctx=document) { return ctx.querySelector(q); }
+    function qAll(q, ctx=document) { return Array.from(ctx.querySelectorAll(q)); }
+    function fmtTime(ts) { return new Date(ts).toLocaleString(); }
+    function short(s, n=30){ return s && s.length>n ? s.slice(0,n-1)+'…' : s; }
 
-  (data.events||[]).forEach(ev=>{
-    const comp = ev.competitions[0];
-    const away = comp.competitors.find(c=>c.homeAway=="away");
-    const home = comp.competitors.find(c=>c.homeAway=="home");
+    /* ===========================
+       DOM references
+       =========================== */
+    const leagueSelect = el('#leagueSelect');
+    const refreshBtn = el('#refreshBtn');
+    const themeBtn = el('#themeBtn');
+    const gamesList = el('#gamesList');
+    const lastUpdated = el('#lastUpdated');
+    const standingsList = el('#standingsList');
+    const teamsList = el('#teamsList');
+    const detailTitle = el('#detailTitle');
+    const detailSub = el('#detailSub');
+    const detailBody = el('#detailBody');
+    const viewButtons = qAll('.viewBtn');
+    const chatLog = el('#chatLog');
+    const chatName = el('#chatName');
+    const chatMsg = el('#chatMsg');
+    const chatSend = el('#chatSend');
+    const ytInput = el('#ytInput');
+    const embedBtn = el('#embedBtn');
+    const ytEmbed = el('#ytEmbed');
+    const teamsBtn = el('#teamsBtn');
 
-    const el = document.createElement("div");
-    el.className="game";
-    el.innerHTML = `
-      <div class="team-block">
-        <img class="team-logo" src="${away.team.logo}" />
-        <div>${away.team.abbreviation}</div>
-      </div>
-      <div class="score">${away.score ?? "-"} — ${home.score ?? "-"}</div>
-      <div class="team-block">
-        <div>${home.team.abbreviation}</div>
-        <img class="team-logo" src="${home.team.logo}" />
-      </div>
-    `;
-    gamesDiv.appendChild(el);
-  });
-}
+    /* ===========================
+       State
+       =========================== */
+    let state = {
+      league: DEFAULT_LEAGUE,
+      scoreboard: null,
+      standings: null,
+      teams: [],
+      selectedEvent: null,
+      socket: null,
+      lastPollAt: 0
+    };
 
-async function loadStandings(){
-  const sportPath = document.getElementById("sport").value;
-  const league = leagues[sportPath];
-  const standingsUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath}/standings`;
-  const data = await getJSON(standingsUrl);
+    /* ===========================
+       Socket.io (chat + live updates)
+       =========================== */
+    let socket = null;
+    function initSocket(){
+      if(!SOCKET_URL) return;
+      try {
+        socket = io(SOCKET_URL);
+        state.socket = socket;
+        socket.on('connect', ()=> {
+          console.log('socket connected', socket.id);
+          socket.emit('subscribe', state.league);
+        });
+        socket.on('live:update', (payload) => {
+          if(payload && payload.league === state.league){
+            console.log('socket live update', payload);
+            state.scoreboard = payload.scores;
+            state.standings = payload.standings;
+            renderScoreboard();
+            renderStandings();
+            lastUpdated.textContent = 'live ' + new Date().toLocaleTimeString();
+          }
+        });
+        socket.on('chat:message', (msg) => {
+          appendChat(msg, false);
+        });
+      } catch(e) {
+        console.warn('Socket init failed:', e);
+      }
+    }
 
-  const box = document.getElementById("standingsList");
-  box.innerHTML = "";
+    function sendSocketChat(msg){
+      if(socket && socket.connected){
+        socket.emit('chat:send', msg);
+      } else {
+        // no socket: store locally & render
+        storeLocalChat(msg);
+        appendChat(msg, true);
+      }
+    }
 
-  const groups = data.standings?.groups?.slice(0,1) || [];
-  groups.forEach(group=>{
-    group.standings.forEach(t=>{
-      const tr = document.createElement("div");
-      tr.style.marginBottom="4px";
-      tr.innerHTML = `<b>${t.team.displayName}</b> — ${t.stats[0].displayValue}`;
-      box.appendChild(tr);
+    // local chat persistence (fallback)
+    function loadLocalChat(){
+      try {
+        const c = JSON.parse(localStorage.getItem('sportz_chat')||'[]');
+        c.forEach(m => appendChat(m, true));
+      } catch(e){}
+    }
+    function storeLocalChat(msg){
+      try {
+        const arr = JSON.parse(localStorage.getItem('sportz_chat')||'[]');
+        arr.push(msg);
+        localStorage.setItem('sportz_chat', JSON.stringify(arr.slice(-200)));
+      } catch(e){}
+    }
+
+    /* ===========================
+       Fetch helpers
+       =========================== */
+    async function getJSON(path){
+      const url = `${API_BASE}/${path}`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
+      return res.json();
+    }
+
+    /* ===========================
+       Render functions
+       =========================== */
+    function renderScoreboard(){
+      const data = state.scoreboard;
+      if(!data || !data.events) {
+        gamesList.innerHTML = '<div class="muted">No games found.</div>';
+        return;
+      }
+      gamesList.innerHTML = '';
+      data.events.forEach(ev => {
+        const comp = ev.competitions?.[0] || {};
+        const away = comp.competitors?.find(c=>c.homeAway==='away') || {};
+        const home = comp.competitors?.find(c=>c.homeAway==='home') || {};
+        const status = ev.status?.type?.shortDetail || ev.status?.type?.description || '—';
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between p-2 rounded cursor-pointer hover:bg-[#0a2b30]';
+        row.innerHTML = `
+          <div class="flex items-center gap-3">
+            <img class="team-logo" src="${escapeHtml(away.team?.logo || '')}" alt="${escapeHtml(away.team?.displayName||'Away')}" onerror="this.style.display='none'"/>
+            <div class="text-sm"><div class="font-semibold">${escapeHtml(away.team?.abbreviation||away.team?.displayName||'AW')}</div><div class="muted text-xs">${escapeHtml(away.team?.location||'')}</div></div>
+          </div>
+
+          <div class="text-right">
+            <div class="font-bold text-lg">${escapeHtml(away.score ?? '—')} — ${escapeHtml(home.score ?? '—')}</div>
+            <div class="muted text-xs">${escapeHtml(status)}</div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <div class="text-sm"><div class="font-semibold">${escapeHtml(home.team?.abbreviation||home.team?.displayName||'HM')}</div><div class="muted text-xs">${escapeHtml(home.team?.location||'')}</div></div>
+            <img class="team-logo" src="${escapeHtml(home.team?.logo || '')}" alt="${escapeHtml(home.team?.displayName||'Home')}" onerror="this.style.display='none'"/>
+          </div>
+        `;
+        row.addEventListener('click', ()=> selectGame(ev));
+        gamesList.appendChild(row);
+      });
+    }
+
+    function renderStandings(){
+      const s = state.standings;
+      if(!s || !s.groups){ standingsList.innerHTML = '<div class="muted">Standings not available.</div>' ; return; }
+      // Summarize first group
+      const group = s.groups[0];
+      const list = document.createElement('div');
+      list.className = 'space-y-1';
+      group.standings.slice(0,10).forEach(t => {
+        const r = document.createElement('div');
+        r.className = 'flex justify-between items-center';
+        const name = t.team?.displayName || t.team?.abbreviation || 'Team';
+        const record = (t.records && t.records[0]) ? `${t.records[0].summary}` : (t.stats && t.stats[0] && t.stats[0].displayValue) || '';
+        r.innerHTML = `<div class="text-sm">${escapeHtml(name)}</div><div class="muted text-sm">${escapeHtml(record)}</div>`;
+        list.appendChild(r);
+      });
+      standingsList.innerHTML = ''; standingsList.appendChild(list);
+    }
+
+    function renderTeams(){
+      // show quick list
+      const s = state.scoreboard;
+      const teams = new Map();
+      if(s && s.events) s.events.forEach(ev=>{
+        const comp = ev.competitions?.[0] || {};
+        (comp.competitors||[]).forEach(c=>{
+          if(c.team) teams.set(c.team.id, c.team);
+        });
+      });
+      const arr = Array.from(teams.values()).slice(0,20);
+      teamsList.innerHTML = '';
+      arr.forEach(t=>{
+        const d = document.createElement('div');
+        d.className = 'flex items-center gap-2 p-1';
+        d.innerHTML = `<img class="team-logo" src="${escapeHtml(t.logo||'')}" onerror="this.style.display='none'"/><div class="text-sm">${escapeHtml(t.displayName)}</div>`;
+        d.addEventListener('click', ()=> openTeam(t.id));
+        teamsList.appendChild(d);
+      });
+      if(arr.length===0) teamsList.innerHTML = '<div class="muted text-sm">No teams available right now.</div>';
+    }
+
+    function selectGame(ev){
+      state.selectedEvent = ev;
+      detailTitle.textContent = ev.name || ev.shortName || 'Game';
+      detailSub.textContent = ev.competitions?.[0]?.venue?.fullName || '';
+      showView('game');
+      renderGameDetail(ev);
+    }
+
+    function renderGameDetail(ev){
+      const comp = ev.competitions?.[0] || {};
+      const away = comp.competitors?.find(c=>c.homeAway==='away') || {};
+      const home = comp.competitors?.find(c=>c.homeAway==='home') || {};
+      const status = ev.status?.type?.description || ev.status?.type?.shortDetail || '—';
+
+      const html = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <div class="flex items-center gap-3 mb-2">
+              <img class="team-logo" src="${escapeHtml(away.team?.logo||'')}" onerror="this.style.display='none'"/>
+              <div><div class="font-semibold">${escapeHtml(away.team?.displayName||'Away')}</div><div class="muted text-xs">${escapeHtml(away.team?.location||'')}</div></div>
+            </div>
+            <div class="text-3xl font-bold mb-1">${escapeHtml(away.score ?? '—')}</div>
+          </div>
+          <div>
+            <div class="flex items-center gap-3 mb-2 justify-end">
+              <div class="text-right"><div class="font-semibold">${escapeHtml(home.team?.displayName||'Home')}</div><div class="muted text-xs">${escapeHtml(home.team?.location||'')}</div></div>
+              <img class="team-logo" src="${escapeHtml(home.team?.logo||'')}" onerror="this.style.display='none'"/>
+            </div>
+            <div class="text-3xl font-bold mb-1 text-right">${escapeHtml(home.score ?? '—')}</div>
+          </div>
+        </div>
+        <div class="muted text-sm mt-3">Status: ${escapeHtml(status)}</div>
+        <div class="mt-3">
+          <button id="openBoxBtn" class="px-3 py-2 rounded bg-[#1d6b78]">Open Boxscore & Fantasy</button>
+          <button id="openTeamHomeBtn" class="px-3 py-2 rounded bg-[#0e2a35] ml-2">Home Team</button>
+          <button id="openTeamAwayBtn" class="px-3 py-2 rounded bg-[#0e2a35] ml-2">Away Team</button>
+        </div>
+        <div id="boxscoreArea" class="mt-3 muted text-sm"></div>
+      `;
+      detailBody.innerHTML = html;
+      el('#openBoxBtn').addEventListener('click', ()=> loadBoxscore(ev));
+      el('#openTeamHomeBtn').addEventListener('click', ()=> openTeam(home.team.id));
+      el('#openTeamAwayBtn').addEventListener('click', ()=> openTeam(away.team.id));
+    }
+
+    async function loadBoxscore(ev){
+      try {
+        const eventId = ev.id || (ev.competitions && ev.competitions[0] && ev.competitions[0].id);
+        if(!eventId) return alert('No event id found.');
+        const path = `/${state.league}/summary?event=${encodeURIComponent(eventId)}`;
+        // When API_BASE already contains trailing path, avoid duplicate slashes
+        const base = API_BASE.endsWith('/') ? API_BASE.slice(0,-1) : API_BASE;
+        const url = base + '/' + state.league + `/summary?event=${encodeURIComponent(eventId)}`;
+        // But because getJSON expects relative path from API_BASE, use that form:
+        const data = await getJSON(`${state.league}/summary?event=${encodeURIComponent(eventId)}`);
+        const box = data.boxscore || data.boxscore && data.boxscore.teams ? data.boxscore : data;
+        const html = renderBoxscoreAndFantasy(data);
+        el('#boxscoreArea').innerHTML = html;
+      } catch(e) {
+        el('#boxscoreArea').innerText = 'Boxscore load error: ' + e.message;
+      }
+    }
+
+    function renderBoxscoreAndFantasy(data){
+      // This function reads boxscore/summary JSON and produces a simple table and fantasy scoring
+      // Note: structure may vary; handle gracefully
+      let teams = [];
+      if(data.boxscore && data.boxscore.teams){
+        teams = data.boxscore.teams;
+      } else if(data.teams){
+        teams = data.teams;
+      } else {
+        return '<div class="muted">Boxscore not found in response.</div>';
+      }
+      // fantasy scoring (simple example):
+      // points: 1, rebounds: 1.2, assists: 1.5, steals: 3, blocks: 3, turnovers: -1
+      function fp(stats){
+        const pts = +(stats.points || 0);
+        const reb = +(stats.rebounds || stats.totalRebounds || 0);
+        const ast = +(stats.assists || 0);
+        const stl = +(stats.steals || 0);
+        const blk = +(stats.blocks || 0);
+        const tov = +(stats.turnovers || 0);
+        return (pts*1) + (reb*1.2) + (ast*1.5) + (stl*3) + (blk*3) - (tov*1);
+      }
+      let html = '';
+      teams.forEach(t => {
+        const teamName = t.team && t.team.displayName ? t.team.displayName : t.name || 'Team';
+        html += `<div class="font-semibold mt-2">${escapeHtml(teamName)}</div>`;
+        const players = (t.players || t.statistics || t.boxscore && t.boxscore.players || []);
+        if(players.length === 0 && t.roster && t.roster.players) {
+          // ESPN summary variants
+          // try to map roster players into stats
+        }
+        html += `<div class="overflow-auto"><table class="w-full text-sm mt-2"><thead class="muted"><tr><th class="text-left">Player</th><th>PTS</th><th>REB</th><th>AST</th><th>FP</th></tr></thead><tbody>`;
+        // Attempt to find player stat sets robustly
+        const rows = [];
+        if(t.statistics && Array.isArray(t.statistics)){
+          // older structure: t.statistics -> players
+          (t.statistics).forEach(p => {
+            const name = p.name || p.displayName || (p.player && p.player.fullName);
+            const stats = {
+              points: p.points || p.stat && p.stat.points || 0,
+              rebounds: p.rebounds || p.totalRebounds || 0,
+              assists: p.assists || 0,
+              steals: p.steals || 0,
+              blocks: p.blocks || 0,
+              turnovers: p.turnovers || 0
+            };
+            rows.push({name, stats});
+          });
+        } else if(t.players && Array.isArray(t.players)){
+          t.players.forEach(p => {
+            const name = (p.player && (p.player.fullName || p.player.displayName)) || p.name || 'Player';
+            const stats = p.stats || p.statistics || {};
+            // try common fields
+            rows.push({
+              name,
+              stats: {
+                points: stats.points || stats.pts || 0,
+                rebounds: stats.rebounds || stats.reb || stats.totalRebounds || 0,
+                assists: stats.assists || stats.ast || 0,
+                steals: stats.steals || stats.stl || 0,
+                blocks: stats.blocks || stats.blk || 0,
+                turnovers: stats.turnovers || stats.to || 0
+              }
+            });
+          });
+        } else if(data.boxscore && data.boxscore.teams){
+          // summary endpoint variant
+          const teamObj = data.boxscore.teams.find(tt=> tt.team && (tt.team.displayName === teamName || (tt.team && tt.team.id === t.team && true)));
+          if(teamObj && teamObj.players){
+            teamObj.players.forEach(p=>{
+              const name = p.player && (p.player.fullName || p.player.displayName) || 'Player';
+              const stats = {
+                points: p.statistics && p.statistics.find(s=>s.name==='points')?.value || p.statistics && p.statistics.find(s=>s.statId===0)?.value || p.stats && p.stats.points || 0,
+                rebounds: p.stats && (p.stats.rebounds || p.stats.totalRebounds) || 0,
+                assists: p.stats && p.stats.assists || 0,
+                steals: p.stats && p.stats.steals || 0,
+                blocks: p.stats && p.stats.blocks || 0,
+                turnovers: p.stats && p.stats.turnovers || 0
+              };
+              rows.push({name, stats});
+            });
+          }
+        }
+
+        // fallback if no rows detected
+        if(rows.length === 0) {
+          html += `<tr><td class="muted">Player data not available for this structure.</td><td></td><td></td><td></td><td></td></tr>`;
+        } else {
+          rows.forEach(r => {
+            const a = r.stats || {};
+            const f = fp(a);
+            html += `<tr><td>${escapeHtml(r.name)}</td><td class="text-center">${escapeHtml(a.points||0)}</td><td class="text-center">${escapeHtml(a.rebounds||0)}</td><td class="text-center">${escapeHtml(a.assists||0)}</td><td class="text-center font-bold">${f.toFixed(1)}</td></tr>`;
+          });
+        }
+        html += `</tbody></table></div>`;
+      });
+      return html;
+    }
+
+    function openTeam(teamId){
+      // fetch team index/info and show team details in detail body
+      showView('team');
+      detailTitle.textContent = 'Team';
+      detailSub.textContent = '';
+      detailBody.innerHTML = 'Loading team info…';
+      fetchTeam(teamId);
+    }
+
+    async function fetchTeam(teamId){
+      try {
+        const data = await getJSON(`${state.league}/teams/${teamId}`);
+        // ESPN returns useful fields under team
+        const team = data.team || data.teams && data.teams[0] || {};
+        const name = team.displayName || team.name || 'Team';
+        const logo = team.logo || (team.links && team.links.logo && team.links.logo.href) || '';
+        let html = `<div class="flex items-center gap-3"><img class="team-logo" src="${escapeHtml(logo)}" onerror="this.style.display='none'"/><div><div class="font-semibold">${escapeHtml(name)}</div><div class="muted text-sm">${escapeHtml(team.location || '')}</div></div></div>`;
+        html += `<div class="mt-3"><button id="teamSchedBtn" class="px-3 py-2 rounded bg-[#1d6b78]">Schedule</button> <button id="teamRosterBtn" class="px-3 py-2 rounded bg-[#0e2a35]">Roster</button></div>`;
+        html += `<div id="teamZone" class="mt-3 muted text-sm"></div>`;
+        detailBody.innerHTML = html;
+        el('#teamSchedBtn').addEventListener('click', ()=> fetchTeamSchedule(teamId));
+        el('#teamRosterBtn').addEventListener('click', ()=> fetchTeamRoster(teamId));
+      } catch(e){
+        detailBody.innerHTML = 'Team fetch error: ' + e.message;
+      }
+    }
+
+    async function fetchTeamSchedule(teamId){
+      try {
+        const data = await getJSON(`${state.league}/teams/${teamId}/schedule`);
+        const zone = el('#teamZone');
+        if(!data || !data.schedule) { zone.innerText = 'Schedule not available.'; return; }
+        const list = document.createElement('div'); list.className = 'space-y-2';
+        (data.schedule.items || data.schedule || []).slice(0,10).forEach(it=>{
+          const date = it.date || it.startDate || it.isoDate || '';
+          const opp = it.opponent || (it.teams && it.teams[0]) || {};
+          const node = document.createElement('div');
+          node.className = 'flex justify-between items-center';
+          node.innerHTML = `<div class="text-sm">${escapeHtml(it.name || opp.name || short(opp.displayName||''))}</div><div class="muted text-sm">${escapeHtml(date ? new Date(date).toLocaleString() : '')}</div>`;
+          list.appendChild(node);
+        });
+        zone.innerHTML = ''; zone.appendChild(list);
+      } catch(e){
+        el('#teamZone').innerText = 'Schedule error: ' + e.message;
+      }
+    }
+
+    async function fetchTeamRoster(teamId){
+      try {
+        const data = await getJSON(`${state.league}/teams/${teamId}/roster`);
+        const zone = el('#teamZone');
+        if(!data || !data.players) { zone.innerText = 'Roster not available.'; return; }
+        const table = document.createElement('div'); table.className='space-y-1';
+        (data.players||[]).forEach(p=>{
+          const node = document.createElement('div');
+          node.className = 'flex items-center gap-2';
+          const name = p.fullName || p.name || (p.player && p.player.fullName) || 'Player';
+          node.innerHTML = `<div class="text-sm">${escapeHtml(name)}</div><div class="muted text-xs">${escapeHtml(p.position||p.role||'')}</div>`;
+          table.appendChild(node);
+        });
+        zone.innerHTML=''; zone.appendChild(table);
+      } catch(e){
+        el('#teamZone').innerText = 'Roster error: ' + e.message;
+      }
+    }
+
+    /* ===========================
+       UI helpers
+       =========================== */
+    function showView(view){
+      viewButtons.forEach(b => b.classList.remove('bg-[#155a61]'));
+      const btn = viewButtons.find(b => b.dataset.view === view);
+      if(btn) btn.classList.add('bg-[#155a61]');
+      // show appropriate detail section with content already loaded
+      if(view === 'game'){
+        // do nothing: detailBody already set in selectGame
+      } else if(view === 'team'){
+        // detailBody will be set by openTeam or fetchTeam
+      } else if(view === 'highlights'){
+        detailBody.innerHTML = '<div class="muted">Use the YouTube embed box on the right, or paste a highlight URL above.</div>';
+      } else if(view === 'fantasy'){
+        if(state.selectedEvent) loadBoxscore(state.selectedEvent);
+        else detailBody.innerHTML = '<div class="muted">Select a game and open boxscore to compute fantasy points.</div>';
+      }
+    }
+
+    function appendChat(msg, local){
+      const d = document.createElement('div');
+      d.className = 'p-1';
+      d.innerHTML = `<div class="text-xs muted">${escapeHtml(msg.name || 'Anon')} · ${new Date(msg.ts||Date.now()).toLocaleTimeString()}</div><div>${escapeHtml(msg.text)}</div>`;
+      chatLog.appendChild(d);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    /* ===========================
+       Initialization & polling
+       =========================== */
+    async function loadAll(){
+      try {
+        state.league = leagueSelect.value;
+        // scoreboard
+        const sb = await getJSON(`${state.league}/scoreboard`);
+        state.scoreboard = sb;
+        renderScoreboard();
+        // standings
+        const st = await getJSON(`${state.league}/standings`);
+        state.standings = st;
+        renderStandings();
+        // teams
+        renderTeams();
+        lastUpdated.textContent = new Date().toLocaleTimeString();
+        state.lastPollAt = Date.now();
+      } catch(e){
+        console.error('loadAll error', e);
+        gamesList.innerHTML = '<div class="muted">Load error. See console (CORS?)</div>';
+      }
+    }
+
+    function periodicPoll(){
+      setInterval(async ()=>{
+        // if socket is connected, prefer socket updates; otherwise poll
+        if(socket && socket.connected) return;
+        try {
+          const now = Date.now();
+          // throttle if too often
+          if(now - state.lastPollAt < POLL_INTERVAL - 200) return;
+          const sb = await getJSON(`${state.league}/scoreboard`);
+          state.scoreboard = sb;
+          renderScoreboard();
+          const st = await getJSON(`${state.league}/standings`);
+          state.standings = st;
+          renderStandings();
+          renderTeams();
+          lastUpdated.textContent = new Date().toLocaleTimeString();
+          state.lastPollAt = now;
+        } catch(e){
+          console.warn('poll error', e);
+        }
+      }, POLL_INTERVAL);
+    }
+
+    /* ===========================
+       Events
+       =========================== */
+    refreshBtn.addEventListener('click', ()=> loadAll());
+    leagueSelect.addEventListener('change', async ()=>{
+      state.league = leagueSelect.value;
+      if(socket && socket.connected){
+        socket.emit('unsubscribe', null);
+        socket.emit('subscribe', state.league);
+      }
+      await loadAll();
     });
-  });
-}
+    themeBtn.addEventListener('click', ()=>{
+      if(document.body.dataset.theme === 'light'){ document.body.dataset.theme = 'dark'; themeBtn.textContent = 'Light'; }
+      else { document.body.dataset.theme = 'light'; themeBtn.textContent = 'Dark'; }
+    });
+    viewButtons.forEach(b => b.addEventListener('click', ()=> showView(b.dataset.view)));
+    embedBtn.addEventListener('click', ()=>{
+      const v = (ytInput.value||'').trim();
+      if(!v) return alert('Paste a YouTube id or URL');
+      // extract video id
+      const id = extractYouTubeID(v);
+      if(!id) return alert('Could not extract a YouTube video id.');
+      ytEmbed.innerHTML = `<div class="aspect-w-16 aspect-h-9"><iframe class="w-full h-60 md:h-40" src="https://www.youtube.com/embed/${encodeURIComponent(id)}" frameborder="0" allowfullscreen></iframe></div>`;
+      // Also set details view to highlight
+      detailTitle.textContent = 'Highlight';
+      detailBody.innerHTML = `<div class="muted">Embedded video below.</div><div class="mt-3">${ytEmbed.innerHTML}</div>`;
+    });
 
-document.getElementById("refresh").onclick = ()=>{loadScores();loadStandings()};
-document.getElementById("sport").onchange = ()=>{loadScores();loadStandings()};
+    teamsBtn.addEventListener('click', ()=> { window.scrollTo({top:0, behavior:'smooth'}); });
 
-document.getElementById("themeBtn").onclick = ()=>{
-  document.body.dataset.theme =
-    document.body.dataset.theme === "light" ? "dark" : "light";
-};
+    chatSend.addEventListener('click', ()=>{
+      const name = (chatName.value||'Guest').trim();
+      const text = (chatMsg.value||'').trim();
+      if(!text) return;
+      const msg = { name, text, ts: Date.now() };
+      sendSocketChat(msg);
+      if(!socket || !socket.connected) appendChat(msg, true);
+      chatMsg.value = '';
+    });
 
-loadScores(); loadStandings();
-setInterval(loadScores,60000);
-</script>
+    document.querySelectorAll('[data-nav]').forEach(btn=>{
+      btn.addEventListener('click', ()=> {
+        const nav = btn.dataset.nav;
+        if(nav === 'scores') window.scrollTo({top:0, behavior:'smooth'});
+        else if(nav === 'standings') { window.scrollTo({top:400, behavior:'smooth'}); }
+        else if(nav === 'teams') { window.scrollTo({top:800, behavior:'smooth'}); }
+        else if(nav === 'chat') { chatLog.scrollIntoView({behavior:'smooth'}); }
+      });
+    });
+
+    // helpers
+    function extractYouTubeID(url){
+      // support id or full url
+      if(!url) return null;
+      // if it seems to be only id
+      if(/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+      // try to extract from common patterns
+      const m = url.match(/(?:v=|\/embed\/|\/watch\/|youtu\\.be\/)([a-zA-Z0-9_-]{11})/);
+      return m ? m[1] : null;
+    }
+
+    function escapeHtml(s){ if(s===null || s===undefined) return ''; return String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    /* ===========================
+       PWA: register basic service worker (cache index and API responses lightly)
+       =========================== */
+    async function registerSW(){
+      if(!('serviceWorker' in navigator)) return;
+      try {
+        // create a simple blob-based service worker for demo (so we don't need external file)
+        const swCode = `
+          const CACHE = 'sportz-v1';
+          self.addEventListener('install', e => {
+            e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/'])));
+            self.skipWaiting();
+          });
+          self.addEventListener('fetch', e => {
+            const url = new URL(e.request.url);
+            // for API requests, use network-first then cache fallback
+            if(url.pathname.includes('/apis/site/v2/sports') || url.pathname.includes('/api/proxy')) {
+              e.respondWith(fetch(e.request).then(r=>{ return r; }).catch(()=>caches.match(e.request)));
+              return;
+            }
+            e.respondWith(caches.match(e.request).then(r=>r || fetch(e.request)));
+          });
+        `;
+        const blob = new Blob([swCode], { type: 'text/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+        await navigator.serviceWorker.register(swUrl);
+        console.log('Service worker registered (demo blob).');
+      } catch(e){ console.warn('SW register failed', e); }
+    }
+
+    /* ===========================
+       Utility: getJSON using API_BASE properly
+       =========================== */
+    async function getJSON(path){
+      // path may already start with league (e.g., 'basketball/nba/scoreboard')
+      let cleaned = path.replace(/^\\/+/, ''); // remove leading slash
+      const url = `${API_BASE}/${cleaned}`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error(res.status+' '+res.statusText);
+      return res.json();
+    }
+
+    /* ===========================
+       Startup
+       =========================== */
+    (async function start(){
+      // init theme
+      document.body.dataset.theme = 'dark';
+      themeBtn.textContent = 'Light';
+
+      // try to init socket but don't fail hard if unreachable
+      try { initSocket(); } catch(e) { console.warn('socket init error', e); }
+
+      // load initial data
+      await loadAll();
+      loadLocalChat();
+      periodicPoll();
+      registerSW();
+
+      // show initial view
+      showView('game');
+
+      // optionally try to connect socket after load
+      // socket already initialized in initSocket
+    })();
+
+  })();
+  </script>
 </body>
 </html>
